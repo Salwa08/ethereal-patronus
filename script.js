@@ -3,6 +3,8 @@ import { OrbitControls } from "jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "jsm/loaders/GLTFLoader.js";
 
 const loader = new GLTFLoader();
+let deerMesh = null;
+let shaderMaterial = null;
 let particles = null;
 
 // 1. INITIAL SETUP
@@ -44,14 +46,55 @@ const material = new THREE.MeshBasicMaterial({
 const cube = new THREE.Mesh(geometry, material);
 scene.add(cube);
 
-window.PATRONUS_VERTICES = null;
+// VERTEX SHADER
+const vertexShader = `
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vPosition = position;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPosition = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+// FRAGMENT SHADER
+const fragmentShader = `
+uniform float time;
+uniform vec3 glowColor;
+varying vec3 vNormal;
+varying vec3 vPosition;
+varying vec3 vViewPosition;
+
+void main() {
+    // 1. Fresnel Effect (edges glow more than center)
+    vec3 viewDirection = normalize(vViewPosition);
+    vec3 normal = normalize(vNormal);
+    float fresnel = pow(1.0 - abs(dot(viewDirection, normal)), 2.5);
+    
+    // 2. Pulsing effect
+    float pulse = sin(time * 1.5) * 0.2 + 0.8;
+    
+    // 3. Volumetric inner glow
+    float innerGlow = pow(1.0 - fresnel, 2.0) * 0.3;
+    
+    // 4. Combine effects
+    vec3 finalColor = glowColor * (fresnel * 1.8 + innerGlow) * pulse;
+    float alpha = fresnel * 0.7 + 0.15;
+    
+    
+    gl_FragColor = vec4(finalColor, alpha);
+}
+`;
+
 
 // LOAD GLB MODEL
 loader.load(
   "models/realistic_deer.glb",
   function (gltf) {
-    let deerMesh = null;
-
     gltf.scene.traverse((child) => {
       if (child.isMesh) {
         deerMesh = child;
@@ -59,18 +102,29 @@ loader.load(
     });
 
     if (deerMesh && deerMesh.geometry) {
-      const positions = deerMesh.geometry.attributes.position.array;
-
-      window.PATRONUS_VERTICES = positions;
-      console.log(
-        "Patronus vertices loaded:",
-        window.PATRONUS_VERTICES.length / 3,
-        "vertices"
-      );
+      console.log("Deer mesh loaded successfully.");
       scene.remove(cube);
 
-      // Create particles from deer vertices
-      createParticlesFromVertices(positions);
+      shaderMaterial = new THREE.ShaderMaterial({
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        uniforms: {
+          time: { value: 0.0 },
+          glowColor: { value: new THREE.Color(0x00ddff) },
+        },
+        transparent: true,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+
+      });
+
+      deerMesh.material = shaderMaterial;
+      deerMesh.scale.set(0.5, 0.5, 0.5);
+      deerMesh.rotation.x = -Math.PI / 2;
+
+      scene.add(deerMesh);
+      console.log("Holographic deer added to scene.");
     } else {
       console.error("No mesh geometry found in the GLB model.");
     }
@@ -81,63 +135,13 @@ loader.load(
   }
 );
 
-// Particles
-
-function createParticlesFromVertices(vertices) {
-  // Remove old particles if they exist
-  if (particles) {
-    scene.remove(particles);
-  }
-
-  const PARTICLE_COUNT = vertices.length / 3;
-
-  // Particle Geometry
-  const particleGeometry = new THREE.BoxGeometry(0.01, 0.01, 0.01);
-
-  // Material (Temporary; this will be replaced by ShaderMaterial later)
-
-  const particleMaterial = new THREE.MeshBasicMaterial({
-    color: 0x00aaff,
-    wireframe: true,
-  });
-
-  // Instanced Mesh
-  particles = new THREE.InstancedMesh(
-    particleGeometry,
-    particleMaterial,
-    PARTICLE_COUNT
-  );
-
-  // Set initial Positions for each particle
-  for (let i = 0; i < PARTICLE_COUNT; i++) {
-    // Get vertex position from the loaded vertices
-    const x = vertices[i * 3]; // here *3 because each vertex has x,y,z
-    const y = vertices[i * 3 + 1];
-    const z = vertices[i * 3 + 2];
-
-    // Set matrix for each instance (instance particle)
-    const matrix = new THREE.Matrix4();
-    matrix.setPosition(x, y, z);
-    particles.setMatrixAt(i, matrix);
-  }
-
-  particles.instanceMatrix.needsUpdate = true; // Notify Three.js of the update
-
-  // Rotate the deer to stand upright (if it's lying flat)
-  particles.rotation.x = -Math.PI / 2; // Rotate 90 degrees around X-axis
-
-  scene.add(particles);
-
-  console.log("Particles created:", PARTICLE_COUNT, "particles");
-}
 
 // 4. ANIMATION LOOP
 function animate() {
   requestAnimationFrame(animate);
 
-  if (particles) {
-    // flight path animation will go here later
-    particles.rotation.y += 0.0005; // Gentle rotation around Y-axis (vertical spin)
+  if (shaderMaterial) {
+    shaderMaterial.uniforms.time.value += 0.016; //~60fps
   }
 
   controls.update();
