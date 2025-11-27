@@ -356,29 +356,31 @@ const trailMaterial = new THREE.ShaderMaterial({
     attribute float aAlpha;
     attribute float aId;
     attribute vec3 color;
+
     uniform float u_time;
+
     varying float vAlpha;
     varying vec3 vColor;
-    varying float vSparkle;
-    void main() {
+    void main() 
+    {
       vAlpha = aAlpha;
       vColor = color;
-      
-      vSparkle = sin(u_time * 3.0 + aId * 6.28) * 0.5 + 0.5;
-      vSparkle = pow(vSparkle, 4.0);
       vec3 pos = position;
       float t = u_time;
 
-      // Drift and wiggle for organic motion
+      // Drift (subtle world-space wiggle inspired by particleThreeJs)
       pos.x += sin(t * 0.5 + aId) * 0.08;
       pos.y += cos(t * 0.2 + aId * 1.3) * 0.04;
       pos.z += sin(t * 0.4 + aId * 2.0) * 0.06;
 
+      // Faster small wiggle
       pos.x += sin(t * 2.0 + aId * 8.0) * 0.01;
       pos.y += cos(t * 3.0 + aId * 6.7) * 0.01;
+
       vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
 
-      gl_PointSize = aSize * (15.0 / -mvPosition.z);
+      // Use a smaller multiplier so point sprites stay reasonable in size
+      gl_PointSize = aSize * (19.0 / -mvPosition.z);
       gl_Position = projectionMatrix * mvPosition;
     }
   `,
@@ -386,15 +388,13 @@ const trailMaterial = new THREE.ShaderMaterial({
     uniform vec3 uAccentColor;
     varying float vAlpha;
     varying vec3 vColor;
-    varying float vSparkle;
     void main() {
       float d = length(gl_PointCoord - vec2(0.5));
       float mask = smoothstep(0.9, 0.0, d);
       
-      vec3 col = mix(vColor, uAccentColor * 2.5, vSparkle * 0.7);
-      float finalAlpha = vAlpha * (1.0 + vSparkle * 0.5);
-      
-      gl_FragColor = vec4(col * mask, mask * finalAlpha);
+      vec3 col = mix(vColor, uAccentColor * 2.5,0.0);
+            
+      gl_FragColor = vec4(col * mask, mask * vAlpha);
     }
   `,
 });
